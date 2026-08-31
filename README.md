@@ -20,7 +20,7 @@ background daemon or telemetry service.
 - Two-minute CPU, memory, and GPU history with per-core utilization
 - Mirrored network throughput history on a shared scale
 - Automatic disk discovery with live read and write rates
-- Root filesystem and swap capacity meters
+- Root, swap, and every mounted local disk in one capacity section, discovered automatically
 - Configurable refresh intervals and warning thresholds
 - Native Omarchy styling with no bundled theme or hard-coded palette
 
@@ -66,11 +66,17 @@ pressure. Warning and critical colors follow the active Omarchy theme.
 | Disk throughput | `/proc/diskstats` and `/sys/class/block` |
 | CPU temperature | `/sys/class/hwmon` (`coretemp`, `k10temp`, or `zenpower`) |
 | GPU load, temperature, and VRAM | `/sys/class/drm/card*/device` (`gpu_busy_percent`, `hwmon`, `mem_info_vram_*`) |
-| Root capacity | `df` |
+| Filesystem capacity | `df -P -k -l -T` |
 
 Temperature is shown when a supported package sensor is available. Disk
 activity aggregates physical devices and ignores loop, RAM, zram, floppy, and
 optical devices.
+
+The capacity section lists the root filesystem, swap, and every other local
+disk `df` reports. Pseudo filesystems (tmpfs, overlay, squashfs, and so on)
+and network mounts are excluded by an on-disk-type allowlist, and subvolumes
+or bind mounts on one device are shown once. Removable drives appear and
+disappear as they are mounted. Nothing to configure.
 
 Each GPU tile is gated on its own sensor, because vendors expose different
 subsets:

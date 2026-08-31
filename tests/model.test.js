@@ -113,6 +113,72 @@ test("byte counter parser distinguishes zero from unavailable", () => {
   assert.equal(Model.parseByteCount("nope"), -1)
 })
 
+test("filesystem discovery lists real local disks and skips pseudo mounts", () => {
+  const raw = [
+    "Filesystem     Type   1024-blocks      Used  Available Capacity Mounted on",
+    "/dev/nvme0n1p2 ext4     491252516 200000000  266000000      43% /",
+    "/dev/nvme0n1p1 vfat        523248     55000     468248      11% /boot",
+    "tmpfs          tmpfs      8143972       120    8143852       1% /run",
+    "/dev/sda1      xfs     1952559104 500000000 1452559104      26% /mnt/data",
+    "efivarfs       efivarfs       128        50         74      41% /sys/firmware/efi/efivars"
+  ].join("\n")
+  const result = Model.parseFilesystems(raw)
+  assert.deepEqual(result.map((entry) => entry.mount), ["/", "/boot", "/mnt/data"])
+  assert.equal(result[0].total, 491252516 * 1024)
+  assert.equal(result[0].used, 200000000 * 1024)
+  assert.ok(result[0].percent > 40 && result[0].percent < 42)
+  assert.ok(!("device" in result[0]))
+})
+
+test("filesystem discovery collapses subvolumes on one device to a single row", () => {
+  const raw = [
+    "Filesystem Type  1024-blocks      Used Available Capacity Mounted on",
+    "/dev/sda2  btrfs   976302080 400000000 574000000      42% /",
+    "/dev/sda2  btrfs   976302080 400000000 574000000      42% /home",
+    "/dev/sda2  btrfs   976302080 400000000 574000000      42% /.snapshots",
+    "/dev/sdb1  ext4    488384000 100000000 363000000      22% /mnt/backup"
+  ].join("\n")
+  const result = Model.parseFilesystems(raw)
+  assert.deepEqual(result.map((entry) => entry.mount), ["/", "/mnt/backup"])
+})
+
+test("filesystem discovery always keeps the root entry even with an unlisted type", () => {
+  const raw = [
+    "Filesystem Type    1024-blocks     Used Available Capacity Mounted on",
+    "overlay    overlay   61202244 20000000  41202244      33% /",
+    "tmpfs      tmpfs      8143972      100   8143872       1% /tmp"
+  ].join("\n")
+  const result = Model.parseFilesystems(raw)
+  assert.deepEqual(result.map((entry) => entry.mount), ["/"])
+  assert.equal(result[0].total, 61202244 * 1024)
+})
+
+test("filesystem discovery marks a zero-block filesystem unavailable", () => {
+  const raw = [
+    "Filesystem Type 1024-blocks Used Available Capacity Mounted on",
+    "/dev/sdz1  ext4           0    0         0        - /mnt/pending"
+  ].join("\n")
+  const result = Model.parseFilesystems(raw)
+  assert.equal(result.length, 1)
+  assert.equal(result[0].total, 0)
+  assert.equal(result[0].percent, -1)
+})
+
+test("filesystem discovery tolerates empty df output", () => {
+  assert.deepEqual(Model.parseFilesystems(""), [])
+  assert.deepEqual(
+    Model.parseFilesystems("Filesystem Type 1024-blocks Used Available Capacity Mounted on"),
+    []
+  )
+})
+
+test("auto-discovered mount labels cannot become rich text", () => {
+  const qml = fs.readFileSync(path.join(root, "Panel.qml"), "utf8")
+  // df-derived mount paths reach CapacityRow's label, so that Text must pin
+  // its format rather than letting Text.AutoText sniff a crafted path.
+  assert.match(qml, /id: capacityLabel[\s\S]{0,320}textFormat: Text\.PlainText/)
+})
+
 test("manifest describes a public bar widget with configurable thresholds", () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(root, "manifest.json"), "utf8"))
   assert.equal(manifest.schemaVersion, 1)

@@ -181,18 +181,58 @@ function parseByteCount(raw) {
   return isFinite(value) && value >= 0 ? value : -1
 }
 
-function parseFilesystem(raw) {
+// On-disk filesystem types worth a capacity row. An allowlist keeps the ever-
+// growing set of pseudo filesystems (tmpfs, overlay, squashfs, cgroup, and so
+// on) out without having to name each one; `df -l` already drops network
+// mounts before this runs.
+var CAPACITY_FILESYSTEMS = {
+  ext2: true, ext3: true, ext4: true, btrfs: true, xfs: true, f2fs: true,
+  zfs: true, jfs: true, reiserfs: true, nilfs2: true, bcachefs: true,
+  vfat: true, exfat: true, ntfs: true, ntfs3: true, hfsplus: true, ufs: true
+}
+
+// Parses `df -P -k -l -T` (POSIX columns, 1K blocks, local only, type column):
+//   Filesystem  Type  1024-blocks  Used  Available  Capacity  Mounted on
+// Returns one entry per physical device, in df's order, as
+// { mount, total, used, percent } with bytes and percent -1 when size is 0.
+// The root filesystem is always included so its meter cannot break; every
+// other row must be a real on-disk type. Rows sharing a source device (btrfs
+// subvolumes, bind mounts) collapse to the shortest mount path, since they
+// report the same free space anyway.
+function parseFilesystems(raw) {
   var lines = String(raw || "").trim().split("\n")
-  if (lines.length < 2) return null
-  var fields = lines[lines.length - 1].trim().split(/\s+/)
-  if (fields.length < 6) return null
-  var total = finiteNumber(fields[1], 0) * 1024
-  var used = finiteNumber(fields[2], 0) * 1024
-  return {
-    total: total,
-    used: used,
-    percent: total > 0 ? clamp(used * 100 / total, 0, 100) : -1
+  var byDevice = ({})
+  var order = []
+
+  for (var i = 1; i < lines.length; i++) {
+    var fields = lines[i].trim().split(/\s+/)
+    if (fields.length < 7) continue
+    var device = fields[0]
+    var type = fields[1]
+    var mount = fields.slice(6).join(" ")
+    if (mount !== "/" && !CAPACITY_FILESYSTEMS[type]) continue
+
+    var total = finiteNumber(fields[2], 0) * 1024
+    var used = finiteNumber(fields[3], 0) * 1024
+    var entry = {
+      mount: mount,
+      total: total,
+      used: used,
+      percent: total > 0 ? clamp(used * 100 / total, 0, 100) : -1
+    }
+
+    var seen = byDevice[device]
+    if (!seen) {
+      byDevice[device] = entry
+      order.push(device)
+    } else if (mount.length < seen.mount.length) {
+      byDevice[device] = entry
+    }
   }
+
+  var result = []
+  for (var d = 0; d < order.length; d++) result.push(byDevice[order[d]])
+  return result
 }
 
 // Rolling-window peak, used to pin a sparkline's vertical scale so the chart
@@ -229,7 +269,7 @@ if (typeof module !== "undefined" && module.exports) {
     parseDiscovery: parseDiscovery,
     parseGpuPercent: parseGpuPercent,
     parseByteCount: parseByteCount,
-    parseFilesystem: parseFilesystem,
+    parseFilesystems: parseFilesystems,
     peakValue: peakValue,
     maximumPercent: maximumPercent,
     escapeMarkup: escapeMarkup
