@@ -25,7 +25,7 @@ background daemon or telemetry service.
 - Native Omarchy styling with no bundled theme or hard-coded palette
 
 <p align="center">
-  <img src="docs/screenshots/system-monitor-panel.png" alt="System Monitor panel with CPU, memory, temperature, network, disk, and capacity metrics" width="485">
+  <img src="docs/screenshots/system-monitor-panel.png" alt="System Monitor panel with CPU, memory, temperature, network, disk throughput, and a capacity section listing the root filesystem, swap, and an auto-discovered boot partition" width="485">
 </p>
 
 ## Install
