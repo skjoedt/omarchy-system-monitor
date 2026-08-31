@@ -191,6 +191,25 @@ Panel {
     return "DISK · " + shortDiskName(devices[0]) + " +" + (devices.length - 1)
   }
 
+  function mountBasename(mount) {
+    var segments = String(mount).split("/")
+    return segments[segments.length - 1] || String(mount)
+  }
+
+  // Auto-discovered mount paths. Escaped like the interface name above for the
+  // shared bar tooltip. Normally the last path segment (/mnt/data -> "data");
+  // when two disks share a basename the colliding ones show the full path.
+  function mountLabel(mount) {
+    var target = String(mount)
+    var base = mountBasename(target)
+    var mounts = metrics.extraFilesystems
+    for (var i = 0; i < mounts.length; i++) {
+      var other = String(mounts[i].mount)
+      if (other !== target && mountBasename(other) === base) return Model.escapeMarkup(target)
+    }
+    return Model.escapeMarkup(base)
+  }
+
   function levelColor(value, warn, crit) {
     if (!isFinite(value) || value < 0) return root.muted
     if (value >= crit) return root.urgent
@@ -339,7 +358,11 @@ Panel {
     open: root.opened
     focusTarget: keyCatcher
     contentWidth: panel.fittedContentWidth(Style.space(380))
-    contentHeight: panel.fittedContentHeight(panelColumn.implicitHeight, Style.space(600))
+    // Capped height, not a fixed one: fittedContentHeight still shrinks to fit
+    // the screen and to the content itself, this just raises the ceiling so
+    // the added CapacityRow entries (one per auto-discovered disk) aren't
+    // clipped.
+    contentHeight: panel.fittedContentHeight(panelColumn.implicitHeight, Style.space(600 + metrics.extraFilesystems.length * 40))
 
     PanelKeyCatcher {
       id: keyCatcher
@@ -691,6 +714,17 @@ Panel {
               label: "Swap"
               value: root.formatPair(metrics.swapUsed, metrics.swapTotal)
               percentValue: metrics.swapPercent
+            }
+
+            Repeater {
+              model: metrics.extraFilesystems
+
+              CapacityRow {
+                required property var modelData
+                label: root.mountLabel(modelData.mount)
+                value: root.formatPair(modelData.used, modelData.total)
+                percentValue: modelData.percent
+              }
             }
           }
 

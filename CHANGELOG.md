@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.2.0 - 2026-08-31
+
+- List every mounted local disk in the capacity section automatically, one row
+  per physical device, alongside the existing root and swap meters. Pseudo and
+  network filesystems (tmpfs, overlay, squashfs, NFS, and the like) are left
+  out, and subvolumes or bind mounts on one device collapse to a single row.
+  No configuration.
+
 ## 1.1.1 - 2026-08-26
 
 - Fix GPU temperature discovery on the `xe` driver (Intel Arc, Meteor Lake,

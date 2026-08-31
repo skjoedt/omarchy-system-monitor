@@ -39,6 +39,7 @@ Item {
   property real filesystemPercent: -1
   property double filesystemUsed: 0
   property double filesystemTotal: 0
+  property var extraFilesystems: []
   property string hostname: ""
   property string autoInterface: ""
   property string cpuTempPath: ""
@@ -341,15 +342,25 @@ Item {
 
   Process {
     id: filesystemProc
-    command: ["df", "-Pk", "/"]
+    // Local, on-disk filesystems only, with a type column; the parser drops
+    // pseudo mounts and collapses subvolumes. `-l` keeps a stale network
+    // mount from hanging df.
+    command: ["df", "-P", "-k", "-l", "-T"]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
-        var parsed = Model.parseFilesystem(text)
-        if (!parsed) return
-        root.filesystemPercent = parsed.percent
-        root.filesystemUsed = parsed.used
-        root.filesystemTotal = parsed.total
+        var all = Model.parseFilesystems(text)
+        var extras = []
+        for (var i = 0; i < all.length; i++) {
+          if (all[i].mount === "/") {
+            root.filesystemPercent = all[i].percent
+            root.filesystemUsed = all[i].used
+            root.filesystemTotal = all[i].total
+          } else {
+            extras.push(all[i])
+          }
+        }
+        root.extraFilesystems = extras
       }
     }
   }
