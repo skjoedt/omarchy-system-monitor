@@ -124,12 +124,6 @@ Panel {
     return value >= 0 ? Math.round(value) + "°C" : "—"
   }
 
-  function temperatureDetail(value, limit) {
-    if (value < 0) return "Unavailable"
-    var remaining = Math.round(limit - value)
-    return remaining >= 0 ? remaining + "°C to limit" : Math.abs(remaining) + "°C over limit"
-  }
-
   function temperatureMeter(value, limit) {
     if (value < 0) return -1
     var span = limit - temperatureFloor
@@ -884,6 +878,7 @@ Panel {
 
       Text {
         width: parent.width
+        visible: text !== ""
         text: tile.detail
         color: root.muted
         font.family: root.fontFamily
@@ -909,7 +904,7 @@ Panel {
     property real limit: 95
 
     value: root.temperatureText(reading)
-    detail: root.temperatureDetail(reading, limit)
+    detail: ""
     meter: root.temperatureMeter(reading, limit)
     meterColor: root.temperatureColor(reading, limit)
     alarming: reading >= limit
