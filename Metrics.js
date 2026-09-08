@@ -141,6 +141,8 @@ function parseDisk(raw, devices) {
 function parseDiscovery(raw) {
   var result = {
     cpuTempPath: "",
+    chipsetTempPath: "",
+    chipsetFanPath: "",
     gpuBusyPath: "",
     gpuTempPath: "",
     gpuVramUsedPath: "",
@@ -154,6 +156,8 @@ function parseDiscovery(raw) {
     var key = lines[i].slice(0, separator)
     var value = lines[i].slice(separator + 1).trim()
     if (key === "cpu_temp") result.cpuTempPath = value
+    else if (key === "chipset_temp") result.chipsetTempPath = value
+    else if (key === "chipset_fan") result.chipsetFanPath = value
     else if (key === "gpu_busy") result.gpuBusyPath = value
     else if (key === "gpu_temp") result.gpuTempPath = value
     else if (key === "gpu_vram_used") result.gpuVramUsedPath = value
@@ -161,6 +165,15 @@ function parseDiscovery(raw) {
     else if (key === "disk" && value !== "") result.devices.push(value)
   }
   return result
+}
+
+// hwmon inputs are integers, not formatted numbers. A blank read is missing,
+// not zero; a stopped fan's explicit zero is a valid measurement.
+function parseHwmonValue(raw, divisor) {
+  var text = String(raw === undefined || raw === null ? "" : raw).trim()
+  if (!/^\d+$/.test(text)) return -1
+  var value = Number(text)
+  return isFinite(value) && divisor > 0 ? value / divisor : -1
 }
 
 // amdgpu publishes utilisation as a bare integer percentage. An unreadable or
@@ -267,6 +280,7 @@ if (typeof module !== "undefined" && module.exports) {
     parseNetwork: parseNetwork,
     parseDisk: parseDisk,
     parseDiscovery: parseDiscovery,
+    parseHwmonValue: parseHwmonValue,
     parseGpuPercent: parseGpuPercent,
     parseByteCount: parseByteCount,
     parseFilesystems: parseFilesystems,

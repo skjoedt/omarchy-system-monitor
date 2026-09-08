@@ -19,3 +19,9 @@ jobs:
         run: jq empty manifest.json
       - name: Run model tests
         run: node --test tests/model.test.js
+      - name: Check discovery shell syntax
+        run: |
+          bash -n discover-sensors.sh
+          bash -n tests/discovery.test.sh
+      - name: Run discovery tests
+        run: bash tests/discovery.test.sh

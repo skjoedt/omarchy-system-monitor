@@ -17,6 +17,7 @@ background daemon or telemetry service.
 - Adaptive bar widget that can show CPU, memory, GPU, or both
 - Expandable dashboard for CPU, RAM, temperature, load, and uptime
 - GPU utilization, temperature, and VRAM, with per-sensor vendor fallbacks
+- Optional chipset temperature and fan RPM in a compact dashboard row
 - Two-minute CPU, memory, and GPU history with per-core utilization
 - Mirrored network throughput history on a shared scale
 - Automatic disk discovery with live read and write rates
@@ -50,7 +51,7 @@ omarchy restart shell
 | Left-click | Open or close the dashboard |
 | Right-click | Cycle `Adaptive` → `CPU` → `Memory` → `Both` → `Icon` (`GPU` is added to the cycle automatically when a card publishes a utilization counter) |
 | Middle-click | Open `btop` |
-| `R` while open | Refresh metrics now |
+| `R` while open | Refresh metrics now and rescan sensors |
 | `B` while open | Open `btop` |
 
 Adaptive mode displays whichever of CPU or memory is currently under more
@@ -65,6 +66,7 @@ pressure. Warning and critical colors follow the active Omarchy theme.
 | Network throughput | `/proc/net/route`, `/proc/net/dev` |
 | Disk throughput | `/proc/diskstats` and `/sys/class/block` |
 | CPU temperature | `/sys/class/hwmon` (`coretemp`, `k10temp`, or `zenpower`) |
+| Chipset temperature and fan RPM | `/sys/class/hwmon` (conservative label discovery or explicit selectors) |
 | GPU load, temperature, and VRAM | `/sys/class/drm/card*/device` (`gpu_busy_percent`, `hwmon`, `mem_info_vram_*`) |
 | Filesystem capacity | `df -P -k -l -T` |
 
@@ -120,6 +122,50 @@ Open **Setup → Plugins → System Monitor** to change these values:
 | Warning threshold | 80% | 50–95% |
 | Critical threshold | 95% | 60–100% |
 | Network interface | Automatic | Leave empty to follow the default route |
+| Chipset temperature sensor | Automatic (empty string) | `chipsetTemperatureSensor`: exact `hwmon-name:label` or `hwmon-name:tempN_input` |
+| Chipset fan sensor | Automatic (empty string) | `chipsetFanSensor`: exact `hwmon-name:label` or `hwmon-name:fanN_input` |
+
+### Chipset sensors
+
+A compact **CHIPSET** row below the headline metrics shows temperature in
+Celsius and fan speed in RPM. These inputs are sampled only while the dashboard
+is open. With the default blank selectors and no matching sensors, the row is
+hidden. An explicit selector keeps the row visible even when unresolved, so a
+missing, unreadable, or malformed reading is shown as unavailable rather than
+zero. An explicit **0 RPM is valid**, for example when the fan is stopped; it is
+not a read failure. Temperature and fan discovery are independent.
+
+Blank selectors use a conservative, case-insensitive label allowlist:
+`CHIPSET`, `PCH`, `SB`, or `Southbridge` (also `South Bridge`), optionally followed
+by `temp` or `temperature` for temperature, or `fan` for fan speed. Spaces and
+underscores can separate these words. Generic kernel labels such as `SYSTIN`,
+`AUXTIN`, or `SMBUSMASTER 1` do not identify a chipset sensor and are not selected
+automatically. Unlabelled channels are not guessed.
+
+To select a verified input manually, use the exact hwmon `name` file value
+before the colon and either the exact, case-sensitive sensor label or its
+`tempN_input` / `fanN_input` filename after it. For example,
+`nct6798:SMBUSMASTER 1` is only a **candidate requiring verification** on an
+ASRock X570 Taichi, not a confirmed mapping or a universal recommendation.
+A fan selector could be `nct6798:fanN_input`, with `N` replaced by the channel
+you have verified is the chipset fan on your motherboard. Verify the input
+mapping against board documentation and firmware readings before using either
+selector; a plausible temperature or RPM alone does not prove the mapping.
+
+Each selector must resolve to exactly one readable input. Ambiguous automatic
+matches remain unavailable. Invalid, unmatched, or ambiguous explicit selectors
+never fall back to another sensor or to automatic selection. Settings store
+the hwmon name and label/input, never a volatile `hwmonN` directory number.
+Discovery runs at initialization, on manual refresh (`R` while open), and when
+either selector changes. Selector changes apply at runtime without restarting
+the shell; use `R` to rescan after making hardware sensors available.
+
+The matching kernel hwmon driver must be available and loaded, and its sysfs
+inputs readable by your user. On applicable Nuvoton-based boards, the installed
+`nct6775` kernel module still needs to be loaded by the user if it is not already
+active; installation alone does not expose the sensors. The plugin does not
+load drivers or change firmware/kernel settings. This is read-only monitoring,
+not fan control: it never writes PWM values or changes fan curves.
 
 ## Update
 
@@ -149,13 +195,26 @@ state is the widget configuration managed by Omarchy in
 
 ## Development
 
-Validate the manifest and run the model tests from a checkout:
+Validate the manifest, check shell syntax, and run the model and discovery
+fixture tests from a checkout:
 
 ```sh
 omarchy plugin validate .
 node --test tests/model.test.js
+bash -n discover-sensors.sh
+bash -n tests/discovery.test.sh
 bash tests/discovery.test.sh
 ```
+
+On a machine with Quickshell (`qs`), also exercise the actual QML collector:
+
+```sh
+node --test tests/runtime.test.js
+```
+
+This offscreen test uses temporary sensor fixtures to check open/closed sampling,
+live selector changes, invalid and failed reads, zero RPM, and rediscovery after
+hwmon renumbering. It does not write to hardware or change the running shell.
 
 Changes inside an installed plugin directory normally hot-reload. Restart the
 shell if a QML component remains cached:

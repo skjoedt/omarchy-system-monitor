@@ -1,5 +1,4 @@
 import QtQuick
-import Quickshell
 import Quickshell.Io
 import "Metrics.js" as Model
 
@@ -8,11 +7,15 @@ Item {
 
   property var settings: ({})
   property bool panelOpen: false
-  readonly property string pluginPath: Quickshell.env("HOME") + "/.config/omarchy/plugins/harshith.system-monitor"
+  readonly property string discoveryScript: decodeURIComponent(Qt.resolvedUrl("discover-sensors.sh").toString().replace(/^file:\/\//, ""))
   readonly property int closedRefreshMs: Math.max(2000, Number(settings.closedRefreshSec || 5) * 1000)
   readonly property int openRefreshMs: Math.max(1000, Number(settings.openRefreshSec || 2) * 1000)
   readonly property string configuredInterface: String(settings.networkInterface || "").trim()
   readonly property string activeInterface: configuredInterface !== "" ? configuredInterface : autoInterface
+  readonly property string chipsetTemperatureSensor: String(settings.chipsetTemperatureSensor || "").trim()
+  readonly property string chipsetFanSensor: String(settings.chipsetFanSensor || "").trim()
+  readonly property bool hasChipset: chipsetTempPath !== "" || chipsetFanPath !== ""
+    || chipsetTemperatureSensor !== "" || chipsetFanSensor !== ""
   readonly property int historyWindowMs: 120000
 
   property real cpuPercent: -1
@@ -28,6 +31,8 @@ Item {
   property real loadFifteen: -1
   property double uptimeSeconds: 0
   property real cpuTemperature: -1
+  property real chipsetTemperature: -1
+  property real chipsetFanRpm: -1
   property real gpuPercent: -1
   property real gpuTemperature: -1
   property double gpuVramUsed: -1
@@ -43,6 +48,9 @@ Item {
   property string hostname: ""
   property string autoInterface: ""
   property string cpuTempPath: ""
+  property string chipsetTempPath: ""
+  property string chipsetFanPath: ""
+  property bool discoveryPending: false
   property string gpuBusyPath: ""
   property string gpuTempPath: ""
   property string gpuVramUsedPath: ""
@@ -65,6 +73,33 @@ Item {
   property var cpuSnapshot: ({})
   property var networkSnapshot: null
   property var diskSnapshot: null
+
+  function discoverSensors() {
+    discoveryPending = true
+    Qt.callLater(runDiscovery)
+  }
+
+  function runDiscovery() {
+    if (discoveryProc.running) return
+    discoveryPending = false
+    discoveryProc.running = true
+  }
+
+  function refresh() {
+    discoverSensors()
+    sample()
+  }
+
+  onChipsetTemperatureSensorChanged: {
+    chipsetTempPath = ""
+    chipsetTemperature = -1
+    discoverSensors()
+  }
+  onChipsetFanSensorChanged: {
+    chipsetFanPath = ""
+    chipsetFanRpm = -1
+    discoverSensors()
+  }
 
   function appendHistory(current, timestamp, value) {
     if (!isFinite(value) || value < 0) return current
@@ -92,6 +127,8 @@ Item {
     // VRAM only moves when the panel is open and a human is looking; polling
     // it on the closed cadence buys nothing and costs two sysfs reads.
     if (panelOpen && gpuVramUsedPath !== "") gpuVramUsedFile.reload()
+    if (panelOpen && chipsetTempPath !== "") chipsetTemperatureFile.reload()
+    if (panelOpen && chipsetFanPath !== "") chipsetFanFile.reload()
 
     var now = Date.now()
     if (panelOpen && !filesystemProc.running && now - lastFilesystemRefreshMs >= 60000) {
@@ -257,6 +294,7 @@ Item {
     path: root.cpuTempPath
     watchChanges: false
     printErrors: false
+    onPathChanged: root.cpuTemperature = -1
     onLoaded: {
       var value = Number(String(text()).trim()) / 1000
       root.cpuTemperature = isFinite(value) && value > 0 ? value : -1
@@ -265,10 +303,34 @@ Item {
   }
 
   FileView {
+    id: chipsetTemperatureFile
+    path: root.panelOpen ? root.chipsetTempPath : ""
+    watchChanges: false
+    printErrors: false
+    onPathChanged: root.chipsetTemperature = -1
+    onLoaded: root.chipsetTemperature = path !== "" ? Model.parseHwmonValue(text(), 1000) : -1
+    onLoadFailed: root.chipsetTemperature = -1
+  }
+
+  FileView {
+    id: chipsetFanFile
+    path: root.panelOpen ? root.chipsetFanPath : ""
+    watchChanges: false
+    printErrors: false
+    onPathChanged: root.chipsetFanRpm = -1
+    onLoaded: root.chipsetFanRpm = path !== "" ? Model.parseHwmonValue(text(), 1) : -1
+    onLoadFailed: root.chipsetFanRpm = -1
+  }
+
+  FileView {
     id: gpuBusyFile
     path: root.gpuBusyPath
     watchChanges: false
     printErrors: false
+    onPathChanged: {
+      root.gpuPercent = -1
+      root.gpuHistory = []
+    }
     onLoaded: {
       root.gpuPercent = Model.parseGpuPercent(text())
       if (root.gpuPercent >= 0) root.gpuHistory = root.appendHistory(root.gpuHistory, Date.now(), root.gpuPercent)
@@ -281,6 +343,7 @@ Item {
     path: root.gpuTempPath
     watchChanges: false
     printErrors: false
+    onPathChanged: root.gpuTemperature = -1
     onLoaded: {
       var value = Number(String(text()).trim()) / 1000
       root.gpuTemperature = isFinite(value) && value > 0 ? value : -1
@@ -293,6 +356,7 @@ Item {
     path: root.gpuVramUsedPath
     watchChanges: false
     printErrors: false
+    onPathChanged: root.gpuVramUsed = -1
     onLoaded: root.gpuVramUsed = Model.parseByteCount(text())
     onLoadFailed: root.gpuVramUsed = -1
   }
@@ -302,6 +366,7 @@ Item {
     path: root.gpuVramTotalPath
     watchChanges: false
     printErrors: false
+    onPathChanged: root.gpuVramTotal = -1
     onLoaded: root.gpuVramTotal = Model.parseByteCount(text())
     onLoadFailed: root.gpuVramTotal = -1
   }
@@ -316,12 +381,18 @@ Item {
 
   Process {
     id: discoveryProc
-    command: ["bash", root.pluginPath + "/discover-sensors.sh"]
+    command: ["bash", root.discoveryScript, root.chipsetTemperatureSensor, root.chipsetFanSensor]
+    onRunningChanged: if (!running && root.discoveryPending) Qt.callLater(root.runDiscovery)
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
+        // A selector changed during discovery. Discard its old result and
+        // queue a new probe when this process finishes.
+        if (root.discoveryPending) return
         var discovered = Model.parseDiscovery(text)
         root.cpuTempPath = discovered.cpuTempPath
+        root.chipsetTempPath = discovered.chipsetTempPath
+        root.chipsetFanPath = discovered.chipsetFanPath
         root.gpuBusyPath = discovered.gpuBusyPath
         root.gpuTempPath = discovered.gpuTempPath
         root.gpuVramUsedPath = discovered.gpuVramUsedPath
@@ -329,6 +400,8 @@ Item {
         root.diskDevices = discovered.devices
         root.diskSnapshot = null
         if (root.cpuTempPath !== "") temperatureFile.reload()
+        if (root.panelOpen && root.chipsetTempPath !== "") chipsetTemperatureFile.reload()
+        if (root.panelOpen && root.chipsetFanPath !== "") chipsetFanFile.reload()
         if (root.gpuBusyPath !== "") gpuBusyFile.reload()
         if (root.gpuTempPath !== "") gpuTemperatureFile.reload()
         // Total VRAM is fixed for the life of the card, so read it once here
@@ -366,7 +439,7 @@ Item {
   }
 
   Component.onCompleted: {
-    discoveryProc.running = true
+    discoverSensors()
     sample()
   }
 }

@@ -71,6 +71,8 @@ test("discovery parser maps sensor probe output into runtime paths", () => {
   ].join("\n")
   assert.deepEqual(Model.parseDiscovery(raw), {
     cpuTempPath: "/sys/class/hwmon/hwmon2/temp1_input",
+    chipsetTempPath: "",
+    chipsetFanPath: "",
     gpuBusyPath: "",
     gpuTempPath: "",
     gpuVramUsedPath: "",
@@ -88,11 +90,79 @@ test("discovery parser captures gpu sensor paths alongside cpu and disks", () =>
     "gpu_vram_used\t/sys/class/drm/card1/device/mem_info_vram_used",
     "gpu_vram_total\t/sys/class/drm/card1/device/mem_info_vram_total"
   ].join("\n")
-  const parsed = Model.parseDiscovery(raw)
-  assert.equal(parsed.gpuBusyPath, "/sys/class/drm/card1/device/gpu_busy_percent")
-  assert.equal(parsed.gpuTempPath, "/sys/class/drm/card1/device/hwmon/hwmon1/temp1_input")
-  assert.equal(parsed.gpuVramTotalPath, "/sys/class/drm/card1/device/mem_info_vram_total")
-  assert.deepEqual(parsed.devices, ["nvme0n1"])
+  const expected = {
+    cpuTempPath: "/sys/class/hwmon/hwmon3/temp1_input",
+    chipsetTempPath: "",
+    chipsetFanPath: "",
+    gpuBusyPath: "/sys/class/drm/card1/device/gpu_busy_percent",
+    gpuTempPath: "/sys/class/drm/card1/device/hwmon/hwmon1/temp1_input",
+    gpuVramUsedPath: "/sys/class/drm/card1/device/mem_info_vram_used",
+    gpuVramTotalPath: "/sys/class/drm/card1/device/mem_info_vram_total",
+    devices: ["nvme0n1"]
+  }
+  assert.deepEqual(Model.parseDiscovery(raw), expected)
+  assert.deepEqual(Model.parseDiscovery([
+    "chipset_temp\t/sys/class/hwmon/hwmon4/temp3_input",
+    raw,
+    "chipset_fan\t/sys/class/hwmon/hwmon4/fan2_input"
+  ].join("\n")), {
+    ...expected,
+    chipsetTempPath: "/sys/class/hwmon/hwmon4/temp3_input",
+    chipsetFanPath: "/sys/class/hwmon/hwmon4/fan2_input"
+  })
+})
+
+test("discovery parser defaults missing chipset sensors independently", () => {
+  for (const raw of [undefined, null, "", "chipset_temp\t\nchipset_fan\t \n", "chipset_temp\nunknown\tignored"]) {
+    assert.deepEqual(Model.parseDiscovery(raw), {
+      cpuTempPath: "",
+      chipsetTempPath: "",
+      chipsetFanPath: "",
+      gpuBusyPath: "",
+      gpuTempPath: "",
+      gpuVramUsedPath: "",
+      gpuVramTotalPath: "",
+      devices: []
+    })
+  }
+  const temperatureOnly = Model.parseDiscovery("chipset_temp\t /sys/class/hwmon/hwmon4/temp3_input \r\n")
+  assert.equal(temperatureOnly.chipsetTempPath, "/sys/class/hwmon/hwmon4/temp3_input")
+  assert.equal(temperatureOnly.chipsetFanPath, "")
+  const fanOnly = Model.parseDiscovery("chipset_fan\t /sys/class/hwmon/hwmon4/fan2_input \n")
+  assert.equal(fanOnly.chipsetTempPath, "")
+  assert.equal(fanOnly.chipsetFanPath, "/sys/class/hwmon/hwmon4/fan2_input")
+})
+
+test("hwmon parser converts integer millidegrees to Celsius and preserves RPM", () => {
+  assert.equal(Model.parseHwmonValue("42500", 1000), 42.5)
+  assert.equal(Model.parseHwmonValue(" \t42500\r\n", 1000), 42.5)
+  assert.equal(Model.parseHwmonValue("1", 1000), 0.001)
+  assert.equal(Model.parseHwmonValue("1800", 1), 1800)
+  assert.equal(Model.parseHwmonValue(" \t1800\r\n", 1), 1800)
+  assert.equal(Model.parseHwmonValue("001800", 1), 1800)
+})
+
+test("hwmon parser treats explicit zero as a valid temperature or stopped fan", () => {
+  for (const divisor of [1000, 1]) {
+    for (const raw of ["0", " 0\n", "000", 0]) {
+      assert.equal(Model.parseHwmonValue(raw, divisor), 0)
+    }
+  }
+})
+
+test("hwmon parser rejects missing, negative, malformed, and non-finite readings", () => {
+  const invalid = [
+    undefined, null, "", " \t\r\n", "abc", "-1", "-42000", "-0", "+1",
+    "nan", "NaN", "inf", "Infinity", "-Infinity", NaN, Infinity,
+    "42000 mC", "1800 RPM", "42 C", "0x10", "0XFF", "0b10", "0o10",
+    "4.2e4", "1e3", "42.5", "1800.0", ".5", "1,800", "18 00", "1800\n1900",
+    "9".repeat(400)
+  ]
+  for (const divisor of [1000, 1]) {
+    for (const raw of invalid) {
+      assert.equal(Model.parseHwmonValue(raw, divisor), -1, `raw=${String(raw)}, divisor=${divisor}`)
+    }
+  }
 })
 
 test("gpu percent parser clamps to the 0-100 band and rejects missing readings", () => {
@@ -191,6 +261,17 @@ test("manifest describes a public bar widget with configurable thresholds", () =
   const barMode = manifest.barWidget.schema.find((entry) => entry.key === "barMode")
   assert.ok(barMode.options.includes("GPU"))
   assert.ok(barMode.options.includes("Icon"))
+})
+
+test("manifest provides optional string selectors for chipset temperature and fan", () => {
+  const manifest = JSON.parse(fs.readFileSync(path.join(root, "manifest.json"), "utf8"))
+  for (const key of ["chipsetTemperatureSensor", "chipsetFanSensor"]) {
+    assert.equal(manifest.barWidget.defaults[key], "")
+    const entries = manifest.barWidget.schema.filter((entry) => entry.key === key)
+    assert.equal(entries.length, 1, `${key} must have exactly one schema entry`)
+    assert.equal(entries[0].type, "string")
+    assert.equal(entries[0].defaultValue, "")
+  }
 })
 
 test("panel exposes bar cycling, btop launch, and live hostname title", () => {

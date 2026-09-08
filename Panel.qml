@@ -336,7 +336,7 @@ Panel {
     function show(): void { root.open() }
     function hide(): void { root.close() }
     function toggle(): void { root.toggle() }
-    function refresh(): string { metrics.sample(); return "ok" }
+    function refresh(): string { metrics.refresh(); return "ok" }
   }
 
   function barPressed(buttonCode) {
@@ -396,7 +396,7 @@ Panel {
       }
       onActivateRequested: if (root.cursorActive) root.activateCursor()
       onTextKey: function(text) {
-        if (text === "r" || text === "R") metrics.sample()
+        if (text === "r" || text === "R") metrics.refresh()
         else if (text === "b" || text === "B") root.launchBtop()
       }
 
@@ -442,7 +442,7 @@ Panel {
                 foreground: root.foreground
                 hoverColor: root.accent
                 fontFamily: root.fontFamily
-                onClicked: metrics.sample()
+                onClicked: metrics.refresh()
               }
             }
           }
@@ -483,6 +483,13 @@ Panel {
               meterColor: root.levelColor(metrics.cpuTemperature, 85, 95)
               alarming: metrics.cpuTemperature >= 95
             }
+          }
+
+          SectionHeading {
+            visible: metrics.hasChipset
+            title: "CHIPSET"
+            value: "Temp " + (metrics.chipsetTemperature >= 0 ? Math.round(metrics.chipsetTemperature) + "°C" : "Unavailable")
+              + " · Fan " + (metrics.chipsetFanRpm >= 0 ? Math.round(metrics.chipsetFanRpm) + " RPM" : "Unavailable")
           }
 
           // ---------- GPU ----------

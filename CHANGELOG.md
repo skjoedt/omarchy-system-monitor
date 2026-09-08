@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- Add an optional compact CHIPSET row below the headline metrics for temperature
+  and fan RPM, sampled only while the dashboard is open. Conservative automatic
+  labels or exact hwmon-name selectors avoid guessing motherboard channels;
+  missing readings stay unavailable and a stopped fan's 0 RPM remains valid.
+- Rescan sensors at initialization, on manual refresh, and when chipset selectors
+  change, applying settings at runtime without persisting volatile hwmon numbers.
+- Document chipset driver prerequisites, selector ambiguity, and board-specific
+  input verification. Monitoring remains read-only with no fan control.
+- Test chipset discovery parsing, strict hwmon readings, and selector defaults;
+  run shell syntax checks and GPU/chipset discovery fixture tests in CI.
+
 ## 1.2.0 - 2026-08-31
 
 - Add an `Icon` bar display mode: the plugin glyph alone, no live text, for

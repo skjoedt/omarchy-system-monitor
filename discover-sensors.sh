@@ -2,7 +2,10 @@
 
 shopt -s nullglob
 
-for hwmon in /sys/class/hwmon/hwmon*; do
+hwmon_root="${OMARCHY_SYSMON_HWMON_ROOT:-/sys/class/hwmon}"
+[[ "$hwmon_root" == /* ]] || hwmon_root="$PWD/$hwmon_root"
+
+for hwmon in "$hwmon_root"/hwmon*; do
   [[ -r "$hwmon/name" ]] || continue
   IFS= read -r name <"$hwmon/name"
   [[ "$name" == "coretemp" || "$name" == "k10temp" || "$name" == "zenpower" ]] || continue
@@ -28,6 +31,60 @@ for hwmon in /sys/class/hwmon/hwmon*; do
     break
   fi
 done
+
+discover_chipset_sensor() {
+  local kind="$1" selector="$2" chip="" sensor="" filename=false
+  local hwmon name candidate input label normalized suffix automatic_pattern selected="" matches=0
+
+  if [[ -n "$selector" ]]; then
+    [[ "$selector" == *:* ]] || return 0
+    chip="${selector%%:*}"
+    sensor="${selector#*:}"
+    [[ -n "$chip" && -n "$sensor" && "$sensor" != *:* ]] || return 0
+    if [[ "$sensor" =~ ^(temp|fan)[0-9]+_input$ ]]; then
+      [[ "$sensor" =~ ^${kind}[0-9]+_input$ ]] || return 0
+      filename=true
+    fi
+  fi
+
+  if [[ "$kind" == temp ]]; then suffix='temp(erature)?'; else suffix='fan'; fi
+  automatic_pattern="^(chipset|pch|sb|south *bridge)( +($suffix))?$"
+  for hwmon in "$hwmon_root"/hwmon*; do
+    [[ -r "$hwmon/name" ]] || continue
+    name=""
+    IFS= read -r name <"$hwmon/name"
+    [[ -z "$selector" || "$name" == "$chip" ]] || continue
+    for candidate in "$hwmon"/"$kind"*_input; do
+      input="${candidate##*/}"
+      [[ "$input" =~ ^${kind}[0-9]+_input$ ]] || continue
+      [[ -f "$candidate" && -r "$candidate" ]] || continue
+      if [[ "$filename" == true ]]; then
+        [[ "$input" == "$sensor" ]] || continue
+      else
+        [[ -r "${candidate%_input}_label" ]] || continue
+        label=""
+        IFS= read -r label <"${candidate%_input}_label"
+        if [[ -n "$selector" ]]; then
+          [[ "$label" == "$sensor" ]] || continue
+        else
+          normalized="${label,,}"
+          normalized="${normalized//_/ }"
+          # Only named chipset sensors, never board-specific channel guesses.
+          [[ "$normalized" =~ $automatic_pattern ]] || continue
+        fi
+      fi
+      selected="$candidate"
+      matches=$((matches + 1))
+    done
+  done
+  if (( matches == 1 )); then
+    printf 'chipset_%s\t%s\n' "$kind" "$selected"
+  fi
+}
+
+# Blank selectors use labels automatically; explicit chip:label/input never falls back.
+discover_chipset_sensor temp "${1:-}"
+discover_chipset_sensor fan "${2:-}"
 
 for block_path in /sys/class/block/*; do
   device="${block_path##*/}"
