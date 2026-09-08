@@ -903,6 +903,9 @@ Panel {
     property real reading: -1
     property real limit: 95
 
+    // Temperature cards have no secondary detail line, so they do not need
+    // the extra vertical space reserved by the CPU and memory cards.
+    height: Style.space(62)
     value: root.temperatureText(reading)
     detail: ""
     meter: root.temperatureMeter(reading, limit)
