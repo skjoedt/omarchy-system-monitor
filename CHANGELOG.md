@@ -4,16 +4,27 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
-- Add an optional compact CHIPSET row below the headline metrics for temperature
-  and fan RPM, sampled only while the dashboard is open. Conservative automatic
-  labels or exact hwmon-name selectors avoid guessing motherboard channels;
-  missing readings stay unavailable and a stopped fan's 0 RPM remains valid.
+- Split the dashboard headline into CPU and MEMORY usage cards, followed by CPU,
+  CHIPSET, and GPU temperature cards. Missing temperature readings remain
+  unavailable; each bar runs from 30 C to its own configurable limit, warns 10
+  C below it, and is urgent at or above it.
+- Add separate CPU (95 C), chipset (95 C), and GPU (89 C) temperature limits,
+  configurable from 60 C through 110 C.
+- Show a compact CHIPSET FAN line only when a chipset sensor is discovered or
+  configured. Chipset inputs are sampled only while the dashboard is open;
+  conservative automatic labels or exact hwmon-name selectors avoid guessing
+  motherboard channels, missing readings stay unavailable, and a stopped fan's
+  0 RPM remains valid.
+- Add a panel-open-only NVIDIA proprietary temperature fallback using a strict,
+  single-value `nvidia-smi` query. It does not add NVIDIA GPU utilization or
+  VRAM monitoring.
 - Rescan sensors at initialization, on manual refresh, and when chipset selectors
   change, applying settings at runtime without persisting volatile hwmon numbers.
 - Document chipset driver prerequisites, selector ambiguity, and board-specific
   input verification. Monitoring remains read-only with no fan control.
-- Test chipset discovery parsing, strict hwmon readings, and selector defaults;
-  run shell syntax checks and GPU/chipset discovery fixture tests in CI.
+- Test chipset discovery parsing, strict hwmon and NVIDIA readings, selector
+  defaults, and bounded temperature limits; run shell syntax checks and
+  GPU/chipset discovery fixture tests in CI.
 
 ## 1.2.0 - 2026-08-31
 
@@ -33,8 +44,9 @@ All notable changes to this project will be documented in this file.
 - Fix GPU temperature discovery on the `xe` driver (Intel Arc, Meteor Lake,
   Lunar Lake and newer): its hwmon package sensor is `temp2_input`, not
   `temp1_input`, so those cards previously reported no temperature at all
-- Document that NVIDIA's proprietary driver exposes no sysfs data whatsoever,
-  not even temperature, and is unsupported by design rather than by omission
+- Document that NVIDIA's proprietary driver exposes no sysfs utilization or
+  VRAM data; the later `nvidia-smi` temperature fallback supersedes the former
+  unsupported-temperature behavior
 
 ## 1.0.1 - 2026-08-20
 

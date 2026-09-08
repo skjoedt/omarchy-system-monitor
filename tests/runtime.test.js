@@ -5,7 +5,7 @@ const os = require("node:os")
 const path = require("node:path")
 const { spawn } = require("node:child_process")
 
-test("Quickshell chipset sampling, selector changes, failures and rediscovery", { timeout: 20000 }, async (t) => {
+test("Quickshell chipset and NVIDIA temperature sampling lifecycle", { timeout: 20000 }, async (t) => {
   const work = fs.mkdtempSync(path.join(os.tmpdir(), "sysmon runtime-"))
   t.after(() => fs.rmSync(work, { recursive: true, force: true }))
   // Quickshell confines relative imports to its config directory. Keep the
@@ -28,11 +28,19 @@ test("Quickshell chipset sampling, selector changes, failures and rediscovery", 
   fs.writeFileSync(path.join(cpu, "temp1_input"), "45000\n")
   const drm = path.join(work, "drm")
   const gpu = path.join(drm, "card0", "device")
-  fs.mkdirSync(path.join(gpu, "hwmon", "hwmon0"), { recursive: true })
-  for (const [file, value] of Object.entries({ gpu_busy_percent: "25", mem_info_vram_used: "1024", mem_info_vram_total: "2048", "hwmon/hwmon0/temp1_input": "48000" }))
+  fs.mkdirSync(gpu, { recursive: true })
+  for (const [file, value] of Object.entries({ gpu_busy_percent: "25", mem_info_vram_used: "1024", mem_info_vram_total: "2048" }))
     fs.writeFileSync(path.join(gpu, file), value + "\n")
 
-  const env = { ...process.env, QT_QPA_PLATFORM: "offscreen", OMARCHY_SYSMON_HWMON_ROOT: hwmon, OMARCHY_SYSMON_DRM_ROOT: drm }
+  const bin = path.join(work, "bin")
+  const nvidiaOutput = path.join(work, "nvidia-output")
+  fs.mkdirSync(bin)
+  fs.writeFileSync(nvidiaOutput, "33\n")
+  const nvidiaSmi = path.join(bin, "nvidia-smi")
+  fs.writeFileSync(nvidiaSmi, "#!/bin/sh\ncat \"$OMARCHY_SYSMON_NVIDIA_OUTPUT\"\n")
+  fs.chmodSync(nvidiaSmi, 0o755)
+
+  const env = { ...process.env, QT_QPA_PLATFORM: "offscreen", OMARCHY_SYSMON_HWMON_ROOT: hwmon, OMARCHY_SYSMON_DRM_ROOT: drm, OMARCHY_SYSMON_NVIDIA_OUTPUT: nvidiaOutput, PATH: bin + path.delimiter + process.env.PATH }
   delete env.WAYLAND_DISPLAY
   const child = spawn("qs", ["-p", path.join(work, "runtime.qml"), "--no-color"], { env })
   t.after(() => child.kill())
@@ -40,9 +48,17 @@ test("Quickshell chipset sampling, selector changes, failures and rediscovery", 
   const handled = new Set()
   const collect = (data) => {
     output += data
-    for (const action of ["malformed", "restore", "remove", "renumber", "empty"]) {
+    for (const action of ["malformed", "restore", "remove", "renumber", "empty", "nvidia-malformed", "nvidia-restore"]) {
       if (handled.has(action) || !output.includes("FIXTURE:" + action)) continue
       handled.add(action)
+      if (action === "nvidia-malformed") {
+        fs.writeFileSync(nvidiaOutput, "invalid\n")
+        continue
+      }
+      if (action === "nvidia-restore") {
+        fs.writeFileSync(nvidiaOutput, "33\n")
+        continue
+      }
       if (action === "renumber") {
         const renamed = path.join(hwmon, "hwmon42")
         fs.renameSync(chip, renamed)

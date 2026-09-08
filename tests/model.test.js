@@ -165,6 +165,14 @@ test("hwmon parser rejects missing, negative, malformed, and non-finite readings
   }
 })
 
+test("NVIDIA temperature parser accepts one nonnegative CSV reading only", () => {
+  assert.equal(Model.parseTemperatureCelsius("33"), 33)
+  assert.equal(Model.parseTemperatureCelsius(" 33.5\n"), 33.5)
+  for (const raw of ["", "-1", "+33", ".5", "33 C", "33\n34", "temperature.gpu\n33", "NaN"]) {
+    assert.equal(Model.parseTemperatureCelsius(raw), -1, `raw=${JSON.stringify(raw)}`)
+  }
+})
+
 test("gpu percent parser clamps to the 0-100 band and rejects missing readings", () => {
   assert.equal(Model.parseGpuPercent("6"), 6)
   assert.equal(Model.parseGpuPercent("150"), 100)
@@ -271,6 +279,26 @@ test("manifest provides optional string selectors for chipset temperature and fa
     assert.equal(entries.length, 1, `${key} must have exactly one schema entry`)
     assert.equal(entries[0].type, "string")
     assert.equal(entries[0].defaultValue, "")
+  }
+})
+
+test("manifest provides bounded temperature limits", () => {
+  const manifest = JSON.parse(fs.readFileSync(path.join(root, "manifest.json"), "utf8"))
+  const expected = { cpuTemperatureLimit: 95, chipsetTemperatureLimit: 95, gpuTemperatureLimit: 89 }
+  const limitKeys = Object.keys(expected).sort()
+  assert.deepEqual(
+    Object.keys(manifest.barWidget.defaults).filter((key) => key.endsWith("TemperatureLimit")).sort(),
+    limitKeys
+  )
+  assert.deepEqual(
+    manifest.barWidget.schema.filter((entry) => entry.key.endsWith("TemperatureLimit")).map((entry) => entry.key).sort(),
+    limitKeys
+  )
+  for (const [key, defaultValue] of Object.entries(expected)) {
+    assert.equal(manifest.barWidget.defaults[key], defaultValue)
+    const entry = manifest.barWidget.schema.find((item) => item.key === key)
+    assert.deepEqual({ type: entry.type, min: entry.min, max: entry.max, defaultValue: entry.defaultValue },
+      { type: "integer", min: 60, max: 110, defaultValue })
   }
 })
 

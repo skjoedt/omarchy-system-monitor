@@ -15,9 +15,9 @@ background daemon or telemetry service.
 ## Highlights
 
 - Adaptive bar widget that can show CPU, memory, GPU, or both
-- Expandable dashboard for CPU, RAM, temperature, load, and uptime
-- GPU utilization, temperature, and VRAM, with per-sensor vendor fallbacks
-- Optional chipset temperature and fan RPM in a compact dashboard row
+- Expandable dashboard with CPU and memory usage cards, temperature, load, and uptime
+- GPU utilization and VRAM when exposed by sysfs, plus temperature fallbacks
+- Optional chipset fan RPM on a compact line when a chipset sensor is available
 - Two-minute CPU, memory, and GPU history with per-core utilization
 - Mirrored network throughput history on a shared scale
 - Automatic disk discovery with live read and write rates
@@ -67,12 +67,16 @@ pressure. Warning and critical colors follow the active Omarchy theme.
 | Disk throughput | `/proc/diskstats` and `/sys/class/block` |
 | CPU temperature | `/sys/class/hwmon` (`coretemp`, `k10temp`, or `zenpower`) |
 | Chipset temperature and fan RPM | `/sys/class/hwmon` (conservative label discovery or explicit selectors) |
-| GPU load, temperature, and VRAM | `/sys/class/drm/card*/device` (`gpu_busy_percent`, `hwmon`, `mem_info_vram_*`) |
+| GPU load and VRAM | `/sys/class/drm/card*/device` (`gpu_busy_percent`, `mem_info_vram_*`) |
+| GPU temperature | DRM hwmon, or NVIDIA proprietary `nvidia-smi` fallback |
 | Filesystem capacity | `df -P -k -l -T` |
 
-Temperature is shown when a supported package sensor is available. Disk
-activity aggregates physical devices and ignores loop, RAM, zram, floppy, and
-optical devices.
+The dashboard starts with CPU and MEMORY usage cards, followed by CPU, CHIPSET,
+and GPU temperature cards. Temperature cards are always present; unavailable,
+missing, or invalid readings are shown as unavailable. Each temperature bar is
+measured from 30 C to its own configured limit, warns 10 C below that limit,
+and becomes urgent at or above it. Disk activity aggregates physical devices
+and ignores loop, RAM, zram, floppy, and optical devices.
 
 The capacity section lists the root filesystem, swap, and every other local
 disk `df` reports. Pseudo filesystems (tmpfs, overlay, squashfs, and so on)
@@ -89,16 +93,18 @@ subsets:
 | `i915` (Intel, pre-Arc) | no | yes, kernel 6.12+ (`temp1_input`) | no |
 | `xe` (Intel, Arc/Meteor Lake/Lunar Lake+) | no | yes, kernel 6.15+ (`temp2_input` — `xe` has no `temp1`) | no |
 | `nouveau` | no | yes (`temp1_input`) | no |
-| NVIDIA proprietary | no | no | no |
+| NVIDIA proprietary | no | yes (`nvidia-smi` fallback) | no |
 
 Only `amdgpu` publishes a device-wide utilization counter in sysfs. Intel
 exposes utilization through the PMU or per-client `fdinfo`, both of which need
 either elevated capabilities or per-process accounting. The NVIDIA proprietary
-driver doesn't register a `hwmon` device at all — not even for temperature —
-so every reading, utilization included, requires NVML (`nvidia-smi`). Reading
-any of these would mean spawning a helper process on every sample, which this
-plugin deliberately avoids, so a card that cannot be read is left out rather
-than reported as idle, and NVIDIA is unsupported outright.
+driver does not expose the sysfs utilization or VRAM readings used here. When
+no DRM GPU temperature sensor is available, the plugin runs
+`nvidia-smi --query-gpu=temperature.gpu --format=csv,noheader,nounits` only
+while the panel is open, at most once per sample and never concurrently. Its
+output must be exactly one nonnegative Celsius value; absent, malformed, or
+multi-value output is unavailable. This fallback provides temperature only,
+not NVIDIA utilization or VRAM.
 
 A card with a temperature sensor but no utilization counter still gets a
 section, showing just the tiles it can fill. When nothing is readable, the
@@ -121,19 +127,30 @@ Open **Setup → Plugins → System Monitor** to change these values:
 | Open refresh | 2 s | 1–10 seconds |
 | Warning threshold | 80% | 50–95% |
 | Critical threshold | 95% | 60–100% |
+| CPU temperature limit | 95 C | 60–110 C |
+| Chipset temperature limit | 95 C | 60–110 C |
+| GPU temperature limit | 89 C | 60–110 C |
 | Network interface | Automatic | Leave empty to follow the default route |
 | Chipset temperature sensor | Automatic (empty string) | `chipsetTemperatureSensor`: exact `hwmon-name:label` or `hwmon-name:tempN_input` |
 | Chipset fan sensor | Automatic (empty string) | `chipsetFanSensor`: exact `hwmon-name:label` or `hwmon-name:fanN_input` |
 
+### Temperature limits
+
+Each temperature bar starts at 30 C and ends at its corresponding limit. It
+warns at 10 C below the limit and is urgent at or above the limit. Set separate
+limits for CPU, chipset, and GPU in Setup; values outside 60–110 C are clamped
+to that range.
+
 ### Chipset sensors
 
-A compact **CHIPSET** row below the headline metrics shows temperature in
-Celsius and fan speed in RPM. These inputs are sampled only while the dashboard
-is open. With the default blank selectors and no matching sensors, the row is
-hidden. An explicit selector keeps the row visible even when unresolved, so a
-missing, unreadable, or malformed reading is shown as unavailable rather than
-zero. An explicit **0 RPM is valid**, for example when the fan is stopped; it is
-not a read failure. Temperature and fan discovery are independent.
+The CHIPSET temperature card and a compact **CHIPSET FAN** line sample their
+inputs only while the dashboard is open. The fan line appears only when a
+chipset temperature or fan is discovered or explicitly configured. With blank
+selectors and no matching sensors, it is hidden. An explicit selector keeps the
+line visible even when unresolved, so a missing, unreadable, or malformed
+reading is shown as unavailable rather than zero. An explicit **0 RPM is
+valid**, for example when the fan is stopped; it is not a read failure.
+Temperature and fan discovery are independent.
 
 Blank selectors use a conservative, case-insensitive label allowlist:
 `CHIPSET`, `PCH`, `SB`, or `Southbridge` (also `South Bridge`), optionally followed

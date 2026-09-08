@@ -7,6 +7,11 @@ Item {
 
   property var settings: ({})
   property bool panelOpen: false
+  function effectiveTemperatureLimit(value, defaultValue) {
+    var parsed = Number(value)
+    if (!isFinite(parsed)) parsed = defaultValue
+    return Math.round(Math.max(60, Math.min(110, parsed)))
+  }
   readonly property string discoveryScript: decodeURIComponent(Qt.resolvedUrl("discover-sensors.sh").toString().replace(/^file:\/\//, ""))
   readonly property int closedRefreshMs: Math.max(2000, Number(settings.closedRefreshSec || 5) * 1000)
   readonly property int openRefreshMs: Math.max(1000, Number(settings.openRefreshSec || 2) * 1000)
@@ -14,6 +19,9 @@ Item {
   readonly property string activeInterface: configuredInterface !== "" ? configuredInterface : autoInterface
   readonly property string chipsetTemperatureSensor: String(settings.chipsetTemperatureSensor || "").trim()
   readonly property string chipsetFanSensor: String(settings.chipsetFanSensor || "").trim()
+  readonly property int cpuTemperatureLimit: effectiveTemperatureLimit(settings.cpuTemperatureLimit, 95)
+  readonly property int chipsetTemperatureLimit: effectiveTemperatureLimit(settings.chipsetTemperatureLimit, 95)
+  readonly property int gpuTemperatureLimit: effectiveTemperatureLimit(settings.gpuTemperatureLimit, 89)
   readonly property bool hasChipset: chipsetTempPath !== "" || chipsetFanPath !== ""
     || chipsetTemperatureSensor !== "" || chipsetFanSensor !== ""
   readonly property int historyWindowMs: 120000
@@ -124,6 +132,10 @@ Item {
     if (cpuTempPath !== "") temperatureFile.reload()
     if (gpuBusyPath !== "") gpuBusyFile.reload()
     if (gpuTempPath !== "") gpuTemperatureFile.reload()
+    if (panelOpen && gpuTempPath === "" && !nvidiaTempProc.running) {
+      gpuTemperature = -1
+      nvidiaTempProc.running = true
+    }
     // VRAM only moves when the panel is open and a human is looking; polling
     // it on the closed cadence buys nothing and costs two sysfs reads.
     if (panelOpen && gpuVramUsedPath !== "") gpuVramUsedFile.reload()
@@ -377,6 +389,20 @@ Item {
     printErrors: false
     onLoaded: root.hostname = String(text()).trim()
     onFileChanged: reload()
+  }
+
+  Process {
+    id: nvidiaTempProc
+    command: ["nvidia-smi", "--query-gpu=temperature.gpu", "--format=csv,noheader,nounits"]
+    onExited: function(exitCode) {
+      if (exitCode !== 0 && root.gpuTempPath === "") root.gpuTemperature = -1
+    }
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        if (root.gpuTempPath === "") root.gpuTemperature = Model.parseTemperatureCelsius(text)
+      }
+    }
   }
 
   Process {

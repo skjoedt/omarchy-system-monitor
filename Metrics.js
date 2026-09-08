@@ -176,6 +176,15 @@ function parseHwmonValue(raw, divisor) {
   return isFinite(value) && divisor > 0 ? value / divisor : -1
 }
 
+// nvidia-smi's CSV query must yield exactly one plain Celsius value. Keeping
+// this strict prevents headers, multiple GPUs, and diagnostics becoming data.
+function parseTemperatureCelsius(raw) {
+  var text = String(raw === undefined || raw === null ? "" : raw).trim()
+  if (!/^\d+(?:\.\d+)?$/.test(text)) return -1
+  var value = Number(text)
+  return isFinite(value) && value >= 0 ? value : -1
+}
+
 // amdgpu publishes utilisation as a bare integer percentage. An unreadable or
 // negative value becomes -1 so the panel prints an em dash instead of "0%",
 // which would wrongly claim the GPU is idle.
@@ -281,6 +290,7 @@ if (typeof module !== "undefined" && module.exports) {
     parseDisk: parseDisk,
     parseDiscovery: parseDiscovery,
     parseHwmonValue: parseHwmonValue,
+    parseTemperatureCelsius: parseTemperatureCelsius,
     parseGpuPercent: parseGpuPercent,
     parseByteCount: parseByteCount,
     parseFilesystems: parseFilesystems,

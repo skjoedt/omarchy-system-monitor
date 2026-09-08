@@ -35,8 +35,14 @@ Panel {
   readonly property real warningThreshold: Math.min(Number(setting("warningPercent", 80)), criticalThreshold - 1)
   readonly property real criticalThreshold: Math.max(Number(setting("criticalPercent", 95)), 61)
   readonly property real pressure: Math.max(metrics.cpuPercent, metrics.memoryPercent)
-  readonly property bool warning: pressure >= warningThreshold || metrics.cpuTemperature >= 85 || metrics.gpuTemperature >= 85
-  readonly property bool critical: pressure >= criticalThreshold || metrics.cpuTemperature >= 95 || metrics.gpuTemperature >= 95
+  readonly property bool warning: pressure >= warningThreshold
+    || metrics.cpuTemperature >= metrics.cpuTemperatureLimit - 10
+    || metrics.chipsetTemperature >= metrics.chipsetTemperatureLimit - 10
+    || metrics.gpuTemperature >= metrics.gpuTemperatureLimit - 10
+  readonly property bool critical: pressure >= criticalThreshold
+    || metrics.cpuTemperature >= metrics.cpuTemperatureLimit
+    || metrics.chipsetTemperature >= metrics.chipsetTemperatureLimit
+    || metrics.gpuTemperature >= metrics.gpuTemperatureLimit
 
   readonly property string heroGlyph: "󰻠"
 
@@ -114,20 +120,24 @@ Panel {
     return one(metrics.loadOne) + " / " + one(metrics.loadFive) + " / " + one(metrics.loadFifteen)
   }
 
-  function temperatureText() {
-    return metrics.cpuTemperature >= 0 ? Math.round(metrics.cpuTemperature) + "°C" : "—"
+  function temperatureText(value) {
+    return value >= 0 ? Math.round(value) + "°C" : "—"
   }
 
-  function temperatureDetail() {
-    if (metrics.cpuTemperature < 0) return "Unavailable"
-    if (metrics.cpuTemperature >= 85) return "Warm"
-    return "Normal"
+  function temperatureDetail(value, limit) {
+    if (value < 0) return "Unavailable"
+    var remaining = Math.round(limit - value)
+    return remaining >= 0 ? remaining + "°C to limit" : Math.abs(remaining) + "°C over limit"
   }
 
-  function temperatureMeter() {
-    if (metrics.cpuTemperature < 0) return -1
-    var span = temperatureCeiling - temperatureFloor
-    return Math.max(0, Math.min(100, (metrics.cpuTemperature - temperatureFloor) * 100 / span))
+  function temperatureMeter(value, limit) {
+    if (value < 0) return -1
+    var span = limit - temperatureFloor
+    return Math.max(0, Math.min(100, (value - temperatureFloor) * 100 / span))
+  }
+
+  function temperatureColor(value, limit) {
+    return levelColor(value, limit - 10, limit)
   }
 
   // Vendors expose different subsets: amdgpu publishes utilisation, memory and
@@ -138,25 +148,7 @@ Panel {
   readonly property bool hasGpuTemperature: metrics.gpuTemperature >= 0
   readonly property bool hasGpuVram: metrics.gpuVramTotal > 0 && metrics.gpuVramUsed >= 0
   readonly property bool hasGpu: hasGpuUsage || hasGpuTemperature
-  readonly property int gpuTileCount: (hasGpuUsage ? 1 : 0) + (hasGpuTemperature ? 1 : 0) + (hasGpuVram ? 1 : 0)
-
-  function gpuTemperatureText() {
-    return metrics.gpuTemperature >= 0 ? Math.round(metrics.gpuTemperature) + "°C" : "—"
-  }
-
-  function gpuTemperatureDetail() {
-    if (metrics.gpuTemperature < 0) return "Unavailable"
-    if (metrics.gpuTemperature >= 85) return "Warm"
-    return "Normal"
-  }
-
-  // Same anchored scale as the CPU package sensor: a cold die drawn as a
-  // fraction of 100°C reads as half-loaded.
-  function gpuTemperatureMeter() {
-    if (metrics.gpuTemperature < 0) return -1
-    var span = temperatureCeiling - temperatureFloor
-    return Math.max(0, Math.min(100, (metrics.gpuTemperature - temperatureFloor) * 100 / span))
-  }
+  readonly property int gpuTileCount: (hasGpuUsage ? 1 : 0) + (hasGpuVram ? 1 : 0)
 
   // Row skips invisible children, so the divisor is the number of tiles that
   // this card can actually fill.
@@ -255,14 +247,14 @@ Panel {
     // Text.AutoText, so neutralize markup before handing it configuration.
     var interfaceName = Model.escapeMarkup(metrics.activeInterface)
     var lines = [
-      "CPU " + percent(metrics.cpuPercent) + " · RAM " + percent(metrics.memoryPercent) + " · " + temperatureText()
+      "CPU " + percent(metrics.cpuPercent) + " · RAM " + percent(metrics.memoryPercent) + " · " + temperatureText(metrics.cpuTemperature)
     ]
     // Skipped entirely on machines without a utilisation-reporting GPU, so
     // the tooltip never grows a row of em dashes.
     if (hasGpu) {
       var gpu = []
       if (hasGpuUsage) gpu.push("GPU " + percent(metrics.gpuPercent))
-      if (hasGpuTemperature) gpu.push((hasGpuUsage ? "" : "GPU ") + gpuTemperatureText())
+      if (hasGpuTemperature) gpu.push((hasGpuUsage ? "" : "GPU ") + temperatureText(metrics.gpuTemperature))
       if (hasGpuVram) gpu.push("VRAM " + gpuVramDetail())
       lines.push(gpu.join(" · "))
     }
@@ -455,7 +447,7 @@ Panel {
             spacing: Style.space(8)
 
             StatTile {
-              width: (parent.width - parent.spacing * 2) / 3
+              width: (parent.width - parent.spacing) / 2
               title: "CPU"
               value: root.percent(metrics.cpuPercent)
               detail: metrics.perCore.length > 0 ? metrics.perCore.length + " threads" : "—"
@@ -465,7 +457,7 @@ Panel {
             }
 
             StatTile {
-              width: (parent.width - parent.spacing * 2) / 3
+              width: (parent.width - parent.spacing) / 2
               title: "MEMORY"
               value: root.percent(metrics.memoryPercent)
               detail: root.formatPair(metrics.memoryUsed, metrics.memoryTotal)
@@ -474,22 +466,39 @@ Panel {
               alarming: metrics.memoryPercent >= root.criticalThreshold
             }
 
-            StatTile {
+          }
+
+          // ---------- Temperatures ----------
+          Row {
+            width: parent.width
+            spacing: Style.space(8)
+
+            TemperatureTile {
               width: (parent.width - parent.spacing * 2) / 3
-              title: "TEMP"
-              value: root.temperatureText()
-              detail: root.temperatureDetail()
-              meter: root.temperatureMeter()
-              meterColor: root.levelColor(metrics.cpuTemperature, 85, 95)
-              alarming: metrics.cpuTemperature >= 95
+              title: "CPU"
+              reading: metrics.cpuTemperature
+              limit: metrics.cpuTemperatureLimit
+            }
+
+            TemperatureTile {
+              width: (parent.width - parent.spacing * 2) / 3
+              title: "CHIPSET"
+              reading: metrics.chipsetTemperature
+              limit: metrics.chipsetTemperatureLimit
+            }
+
+            TemperatureTile {
+              width: (parent.width - parent.spacing * 2) / 3
+              title: "GPU"
+              reading: metrics.gpuTemperature
+              limit: metrics.gpuTemperatureLimit
             }
           }
 
           SectionHeading {
             visible: metrics.hasChipset
-            title: "CHIPSET"
-            value: "Temp " + (metrics.chipsetTemperature >= 0 ? Math.round(metrics.chipsetTemperature) + "°C" : "Unavailable")
-              + " · Fan " + (metrics.chipsetFanRpm >= 0 ? Math.round(metrics.chipsetFanRpm) + " RPM" : "Unavailable")
+            title: "CHIPSET FAN"
+            value: metrics.chipsetFanRpm >= 0 ? Math.round(metrics.chipsetFanRpm) + " RPM" : "Unavailable"
           }
 
           // ---------- GPU ----------
@@ -498,7 +507,7 @@ Panel {
           Row {
             width: parent.width
             spacing: Style.space(8)
-            visible: root.hasGpu
+            visible: root.hasGpuUsage || root.hasGpuVram
 
             StatTile {
               visible: root.hasGpuUsage
@@ -509,17 +518,6 @@ Panel {
               meter: metrics.gpuPercent
               meterColor: root.levelColor(metrics.gpuPercent, root.warningThreshold, root.criticalThreshold)
               alarming: metrics.gpuPercent >= root.criticalThreshold
-            }
-
-            StatTile {
-              visible: root.hasGpuTemperature
-              width: root.gpuTileWidth(parent.width, parent.spacing)
-              title: "GPU TEMP"
-              value: root.gpuTemperatureText()
-              detail: root.gpuTemperatureDetail()
-              meter: root.gpuTemperatureMeter()
-              meterColor: root.levelColor(metrics.gpuTemperature, 85, 95)
-              alarming: metrics.gpuTemperature >= 95
             }
 
             StatTile {
@@ -902,6 +900,19 @@ Panel {
       value: tile.meter
       fillColor: tile.meterColor
     }
+  }
+
+  // Temperature bars start at the useful low end and fill toward each card's
+  // own configured limit. The detail states remaining headroom explicitly.
+  component TemperatureTile: StatTile {
+    property real reading: -1
+    property real limit: 95
+
+    value: root.temperatureText(reading)
+    detail: root.temperatureDetail(reading, limit)
+    meter: root.temperatureMeter(reading, limit)
+    meterColor: root.temperatureColor(reading, limit)
+    alarming: reading >= limit
   }
 
   component LegendDot: Row {

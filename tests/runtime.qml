@@ -29,7 +29,7 @@ ShellRoot {
       switch (root.stage) {
       case 0:
         if (metrics.chipsetTempPath === "" || metrics.chipsetFanPath === "") return
-        if (metrics.cpuTemperature !== 45 || metrics.gpuPercent !== 25 || metrics.gpuTemperature !== 48
+        if (metrics.cpuTemperature !== 45 || metrics.gpuPercent !== 25 || metrics.gpuTemperature !== -1
             || metrics.gpuVramUsed !== 1024 || metrics.gpuVramTotal !== 2048) return
         if (!root.check(metrics.hasChipset && metrics.chipsetTemperature === -1 && metrics.chipsetFanRpm === -1,
                         "closed panel must not read chipset sensors")) return
@@ -37,6 +37,7 @@ ShellRoot {
         root.stage++
         break
       case 1:
+        if (metrics.gpuTemperature !== 33) return
         if (metrics.chipsetTemperature !== 42.5 || metrics.chipsetFanRpm !== 0) return
         metrics.settings = { openRefreshSec: 1, chipsetTemperatureSensor: "board:SMBUSMASTER 1", chipsetFanSensor: "board:fan6_input" }
         root.stage++
@@ -98,15 +99,25 @@ ShellRoot {
         root.stage++
         break
       case 11:
+        console.log("FIXTURE:nvidia-malformed")
+        root.stage++
+        break
+      case 12:
+        if (metrics.gpuTemperature !== -1) return
+        console.log("FIXTURE:nvidia-restore")
+        root.stage++
+        break
+      case 13:
+        if (metrics.gpuTemperature !== 33) return
         metrics.settings = {}
         metrics.refresh()
         root.stage++
         break
-      case 12:
+      case 14:
         if (metrics.hasChipset) return
         if (!root.check(metrics.chipsetTemperature === -1 && metrics.chipsetFanRpm === -1,
                         "missing hardware must clear readings")) return
-        if (!root.check(metrics.cpuTemperature === -1 && metrics.gpuPercent === -1 && metrics.gpuTemperature === -1
+        if (!root.check(metrics.cpuTemperature === -1 && metrics.gpuPercent === -1 && metrics.gpuTemperature === 33
                         && metrics.gpuVramUsed === -1 && metrics.gpuVramTotal === -1 && metrics.gpuHistory.length === 0,
                         "rediscovery must also clear removed CPU/GPU readings")) return
         console.log("PASS: chipset runtime lifecycle")
